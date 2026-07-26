@@ -5,22 +5,37 @@ import json
 
 URL = "https://www.momtaznews.com/%D8%A2%D8%AE%D8%B1%DB%8C%D9%86-%D9%88%D8%B6%D8%B9%DB%8C%D8%AA-%D8%AA%D8%B1%D8%A7%D9%81%DB%8C%DA%A9-%D8%AC%D8%A7%D8%AF%D9%87-%D9%87%D8%A7/"
 DISCORD_WEBHOOK = os.environ.get("DISCORD_WEBHOOK")
-STATUS_FILE = "last_status.txt"
+STATUS_FILE = "last_status.json"   # تغییر به json
 
 def send_discord_message(content: str):
     if not DISCORD_WEBHOOK:
         print("⚠️ DISCORD_WEBHOOK not set.")
         return
-    data = {"content": content}
-    headers = {"Content-Type": "application/json"}
-    try:
-        resp = requests.post(DISCORD_WEBHOOK, data=json.dumps(data), headers=headers)
-        if resp.status_code == 204:
-            print("✅ پیام به دیسکورد ارسال شد.")
+    # اگر طول پیام بیش از ۲۰۰۰ کاراکتر بود، تکه‌تکه می‌فرستیم
+    max_len = 1950  # کمی کمتر از ۲۰۰۰ برای احتیاط
+    while len(content) > 0:
+        if len(content) <= max_len:
+            chunk = content
+            content = ""
         else:
-            print(f"❌ خطا در ارسال: {resp.status_code} {resp.text}")
-    except Exception as e:
-        print(f"❌ خطای اتصال: {e}")
+            # برش در نزدیکترین خط جدید
+            split_at = content.rfind("\n", 0, max_len)
+            if split_at == -1:
+                split_at = max_len
+            chunk = content[:split_at]
+            content = content[split_at:].lstrip()
+        data = {"content": chunk}
+        headers = {"Content-Type": "application/json"}
+        try:
+            resp = requests.post(DISCORD_WEBHOOK, data=json.dumps(data), headers=headers)
+            if resp.status_code == 204:
+                print(f"✅ قطعه ارسال شد ({len(chunk)} کاراکتر)")
+            else:
+                print(f"❌ خطا در ارسال: {resp.status_code} {resp.text}")
+                break
+        except Exception as e:
+            print(f"❌ خطای اتصال: {e}")
+            break
 
 def get_traffic_info():
     headers = {"User-Agent": "Mozilla/5.0 (compatible; TrafficBot/1.0)"}
@@ -33,57 +48,62 @@ def get_traffic_info():
         print("⚠️ محتوای خبر پیدا نشد.")
         return
 
-    # حذف بخش‌های نامربوط (مطالب پیشنهادی و تبلیغات)
+    # حذف بخش‌های نامربوط
     crp = content_div.find("div", id="crp_related")
     if crp:
         crp.decompose()
 
-    # پیدا کردن تمام جعبه‌های وضعیت راه‌ها
     road_boxes = content_div.find_all("div", class_="road-box")
     if not road_boxes:
         print("⚠️ هیچ جعبه اطلاعات راه پیدا نشد.")
         return
 
-    sections = []
+    # دیکشنری جدید از وضعیت فعلی: کلید = عنوان (بدون "بروزرسانی: ...")، مقدار = متن بولت‌دار
+    new_sections = {}
     for box in road_boxes:
-        # عنوان (h3)
         h3 = box.find("h3")
-        title = h3.get_text(strip=True) if h3 else "بدون عنوان"
-        # محتوا (p) – ممکن است چند p باشد، اما معمولاً یکی است
+        if not h3:
+            continue
+        # جدا کردن عنوان اصلی از بروزرسانی
+        raw_title = h3.get_text(strip=True)
+        # حذف بخش "(بروزرسانی: ...)" برای کلید
+        clean_title = raw_title.split("(بروزرسانی:")[0].strip()
+        # محتوا
         p = box.find("p")
         if p:
-            # خط‌های داخل p رو جدا می‌کنیم و بولت می‌زنیم
             lines = [line.strip() for line in p.get_text(separator="\n").splitlines() if line.strip()]
-            # هر خط رو با • نمایش می‌دهیم
             content = "\n".join(f"• {line}" for line in lines)
         else:
             content = "اطلاعات موجود نیست."
-        sections.append(f"**{title}:**\n{content}")
-
-    # ساخت پیام نهایی (راست‌چین با \u200F)
-    new_status = "\u200F" + "\n\n".join(sections)
+        new_sections[clean_title] = f"**{clean_title}:**\n{content}"
 
     # خواندن وضعیت قبلی
-    old_status = ""
+    old_sections = {}
     if os.path.exists(STATUS_FILE):
         with open(STATUS_FILE, "r", encoding="utf-8") as f:
-            old_status = f.read().strip()
+            try:
+                old_sections = json.load(f)
+            except:
+                old_sections = {}
 
-    if new_status.strip() == old_status:
-        print("ℹ️ تغییری در وضعیت راه‌ها ایجاد نشده. پیامی به دیسکورد ارسال نمی‌شود.")
-        return
+    # پیدا کردن بخش‌های تغییرکرده
+    changed = False
+    for title, text in new_sections.items():
+        old_text = old_sections.get(title, "")
+        if text != old_text:
+            changed = True
+            # ارسال پیام راست‌چین
+            message = "\u200F" + text
+            print(f"🔄 تغییر در بخش «{title}»")
+            send_discord_message(message)
 
-    print("🔄 تغییرات جدید شناسایی شد. ارسال به دیسکورد...")
-    if len(new_status) > 2000:
-        message_to_send = new_status[:1900] + "\n... (متن کامل در لاگ موجود است)"
+    if not changed:
+        print("ℹ️ تغییری در هیچ یک از بخش‌ها ایجاد نشده. پیامی ارسال نمی‌شود.")
     else:
-        message_to_send = new_status
-
-    send_discord_message(message_to_send)
-
-    with open(STATUS_FILE, "w", encoding="utf-8") as f:
-        f.write(new_status)
-    print("✅ فایل وضعیت به‌روزرسانی شد.")
+        # ذخیره وضعیت جدید
+        with open(STATUS_FILE, "w", encoding="utf-8") as f:
+            json.dump(new_sections, f, ensure_ascii=False, indent=2)
+        print("✅ فایل وضعیت به‌روزرسانی شد.")
 
 if __name__ == "__main__":
     get_traffic_info()
