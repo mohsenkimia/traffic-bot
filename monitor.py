@@ -1,51 +1,52 @@
-from playwright.sync_api import sync_playwright
-import hashlib
-import os
 import requests
+from bs4 import BeautifulSoup
 import re
 
-URL = "https://141.ir/news/latest-roads-state"
-WEBHOOK = os.environ["DISCORD_WEBHOOK"]
-STATE_FILE = "last_status.txt"
+URL = "https://www.momtaznews.com/%D8%A2%D8%AE%D8%B1%DB%8C%D9%86-%D9%88%D8%B6%D8%B9%DB%8C%D8%AA-%D8%B1%D8%A7%D9%87%E2%80%8C%D9%87%D8%A7%DB%8C-%DA%A9%D8%B4%D9%88%D8%B1/"
 
-with sync_playwright() as p:
-    browser = p.chromium.launch(headless=True)
-    page = browser.new_page()
-    page.goto(URL, wait_until="networkidle", timeout=90000)
-    text = page.locator("body").inner_text()
-    browser.close()
+def get_traffic_info():
+    headers = {
+        "User-Agent": "Mozilla/5.0 (compatible; TrafficBot/1.0)"
+    }
+    resp = requests.get(URL, headers=headers, timeout=30)
+    resp.raise_for_status()
+    soup = BeautifulSoup(resp.text, "html.parser")
 
-match = re.search(
-    r"آخرین وضعیت جوی ترافیکی محورهای شمالی(.*?)(آخرین وضعیت جوی ترافیکی سایر محورها|آخرین وضعیت جوی ترافیکی سایر محور ها)",
-    text,
-    re.S,
-)
+    # محتوای اصلی خبر داخل div با این کلاس‌ها قرار دارد
+    content_div = soup.find("div", class_="post-single-content")
+    if not content_div:
+        print("⚠️ نتوانستیم محتوای خبر را پیدا کنیم.")
+        return
 
-if not match:
-    raise Exception("بخش محورهای شمالی پیدا نشد")
+    # تمام متن داخل آن div را بگیریم
+    full_text = content_div.get_text(separator="\n", strip=True)
 
-status = match.group(1).strip()
-new_hash = hashlib.sha256(status.encode("utf-8")).hexdigest()
-old_hash = ""
+    # جدا کردن بخش "محورهای مسدود" و "ممنوعیت تردد"
+    # با استفاده از عبارت‌های کلیدی
+    blocked_section = ""
+    restricted_section = ""
 
-if os.path.exists(STATE_FILE):
-    with open(STATE_FILE, "r", encoding="utf-8") as f:
-        old_hash = f.read().strip()
+    if "محورهای مسدود" in full_text:
+        # از "محورهای مسدود" تا "ممنوعیت تردد" یا انتها
+        start = full_text.find("محورهای مسدود")
+        end = full_text.find("ممنوعیت تردد", start)
+        if end == -1:
+            end = len(full_text)
+        blocked_section = full_text[start:end].strip()
+    else:
+        blocked_section = "اطلاعات محورهای مسدود یافت نشد."
 
-if new_hash != old_hash:
-    message = f"""🚨 **آخرین وضعیت جوی ترافیکی محورهای شمالی تغییر کرد**
+    if "ممنوعیت تردد" in full_text:
+        start = full_text.find("ممنوعیت تردد")
+        # معمولاً تا انتهای div
+        restricted_section = full_text[start:].strip()
+    else:
+        restricted_section = "اطلاعات ممنوعیت تردد یافت نشد."
 
-{status}
+    # نمایش خروجی (می‌توانید فرمت دلخواه را تغییر دهید)
+    print("🚧 محورهای مسدود:\n" + blocked_section)
+    print("\n" + "="*50)
+    print("⛔ ممنوعیت تردد:\n" + restricted_section)
 
-🔗 {URL}
-"""
-    requests.post(
-        WEBHOOK,
-        json={"content": message},
-        timeout=30,
-    )
-    with open(STATE_FILE, "w", encoding="utf-8") as f:
-        f.write(new_hash)
-    print("Changes detected and sent to Discord.")
-else:
-    print("No changes.")
+if __name__ == "__main__":
+    get_traffic_info()
