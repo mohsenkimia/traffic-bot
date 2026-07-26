@@ -3,7 +3,7 @@ import requests
 from bs4 import BeautifulSoup
 import json
 
-URL = "https://www.momtaznews.com/%D8%A2%D8%AE%D8%B1%DB%8C%D9%86-%D9%88%D8%B6%D8%B9%DB%8C%D8%AA-%D8%B1%D8%A7%D9%87%E2%80%8C%D9%87%D8%A7%DB%8C-%DA%A9%D8%B4%D9%88%D8%B1/"
+URL = "https://www.momtaznews.com/%D8%A2%D8%AE%D8%B1%DB%8C%D9%86-%D9%88%D8%B6%D8%B9%DB%8C%D8%AA-%D8%AA%D8%B1%D8%A7%D9%81%DB%8C%DA%A9-%D8%AC%D8%A7%D8%AF%D9%87-%D9%87%D8%A7/"
 DISCORD_WEBHOOK = os.environ.get("DISCORD_WEBHOOK")
 STATUS_FILE = "last_status.txt"
 
@@ -33,64 +33,54 @@ def get_traffic_info():
         print("⚠️ محتوای خبر پیدا نشد.")
         return
 
-    # حذف بخش‌های نامربوط
-    related = content_div.find("div", id="crp_related")
-    if related:
-        related.decompose()
-    for p in content_div.find_all("p"):
-        if "پرشین خودرو" in p.get_text():
-            p.decompose()
-            break
+    # حذف بخش‌های نامربوط (مطالب پیشنهادی و تبلیغات)
+    crp = content_div.find("div", id="crp_related")
+    if crp:
+        crp.decompose()
 
-    full_text = content_div.get_text(separator="\n", strip=True)
+    # پیدا کردن تمام جعبه‌های وضعیت راه‌ها
+    road_boxes = content_div.find_all("div", class_="road-box")
+    if not road_boxes:
+        print("⚠️ هیچ جعبه اطلاعات راه پیدا نشد.")
+        return
 
-    # استخراج محورهای مسدود (فقط از "محورهای مسدود تا اطلاع ثانوی" به بعد)
-    blocked = "اطلاعات محورهای مسدود یافت نشد."
-    if "محورهای مسدود تا اطلاع ثانوی" in full_text:
-        start = full_text.find("محورهای مسدود تا اطلاع ثانوی")
-        end = full_text.find("ممنوعیت تردد", start)
-        if end == -1:
-            end = len(full_text)
-        blocked = full_text[start:end].strip()
-    elif "محورهای مسدود" in full_text:   # fallback
-        start = full_text.find("محورهای مسدود")
-        end = full_text.find("ممنوعیت تردد", start)
-        if end == -1:
-            end = len(full_text)
-        blocked = full_text[start:end].strip()
+    sections = []
+    for box in road_boxes:
+        # عنوان (h3)
+        h3 = box.find("h3")
+        title = h3.get_text(strip=True) if h3 else "بدون عنوان"
+        # محتوا (p) – ممکن است چند p باشد، اما معمولاً یکی است
+        p = box.find("p")
+        if p:
+            # خط‌های داخل p رو جدا می‌کنیم و بولت می‌زنیم
+            lines = [line.strip() for line in p.get_text(separator="\n").splitlines() if line.strip()]
+            # هر خط رو با • نمایش می‌دهیم
+            content = "\n".join(f"• {line}" for line in lines)
+        else:
+            content = "اطلاعات موجود نیست."
+        sections.append(f"**{title}:**\n{content}")
 
-    # استخراج ممنوعیت تردد (فقط از "ممنوعیت تردد به‌تفکیک" به بعد)
-    restricted = "اطلاعات ممنوعیت تردد یافت نشد."
-    if "ممنوعیت تردد به‌تفکیک" in full_text:
-        start = full_text.find("ممنوعیت تردد به‌تفکیک")
-        restricted = full_text[start:].strip()
-    elif "ممنوعیت تردد" in full_text:   # fallback
-        start = full_text.find("ممنوعیت تردد")
-        restricted = full_text[start:].strip()
+    # ساخت پیام نهایی (راست‌چین با \u200F)
+    new_status = "\u200F" + "\n\n".join(sections)
 
-    # متن جدید برای ذخیره و مقایسه
-    new_status = "\u200F" + f"**🚧 محورهای مسدود:**\n{blocked}\n\n**⛔ ممنوعیت تردد:**\n{restricted}"
-
-    # خواندن آخرین وضعیت از فایل
+    # خواندن وضعیت قبلی
     old_status = ""
     if os.path.exists(STATUS_FILE):
         with open(STATUS_FILE, "r", encoding="utf-8") as f:
             old_status = f.read().strip()
 
-    # مقایسه
     if new_status.strip() == old_status:
         print("ℹ️ تغییری در وضعیت راه‌ها ایجاد نشده. پیامی به دیسکورد ارسال نمی‌شود.")
         return
 
-    # تغییر وجود دارد: ارسال به دیسکورد و به‌روزرسانی فایل
     print("🔄 تغییرات جدید شناسایی شد. ارسال به دیسکورد...")
     if len(new_status) > 2000:
         message_to_send = new_status[:1900] + "\n... (متن کامل در لاگ موجود است)"
     else:
         message_to_send = new_status
+
     send_discord_message(message_to_send)
 
-    # ذخیره وضعیت جدید
     with open(STATUS_FILE, "w", encoding="utf-8") as f:
         f.write(new_status)
     print("✅ فایل وضعیت به‌روزرسانی شد.")
