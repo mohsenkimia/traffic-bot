@@ -72,7 +72,7 @@ def get_traffic_info():
         p = box.find("p")
         if p:
             lines = [line.strip() for line in p.get_text(separator="\n").splitlines() if line.strip()]
-            content = "\n".join(f"• {line}" for line in lines)
+            content = "\n".join(lines)
         else:
             content = "اطلاعات موجود نیست."
         new_sections[clean_title] = f"**{clean_title}:**\n{content}"
