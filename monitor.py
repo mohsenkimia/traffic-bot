@@ -69,7 +69,7 @@ def get_traffic_info():
         restricted = full_text[start:].strip()
 
     # متن جدید برای ذخیره و مقایسه
-    new_status = f"🚧 محورهای مسدود:\n{blocked}\n\n⛔ ممنوعیت تردد:\n{restricted}"
+    new_status = f"**🚧 محورهای مسدود:**\n{blocked}\n\n**⛔ ممنوعیت تردد:**\n{restricted}"
 
     # خواندن آخرین وضعیت از فایل
     old_status = ""
