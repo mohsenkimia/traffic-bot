@@ -44,18 +44,27 @@ def get_traffic_info():
 
     full_text = content_div.get_text(separator="\n", strip=True)
 
-    # استخراج محورهای مسدود و ممنوعیت تردد
+    # استخراج محورهای مسدود (فقط از "محورهای مسدود تا اطلاع ثانوی" به بعد)
     blocked = "اطلاعات محورهای مسدود یافت نشد."
-    restricted = "اطلاعات ممنوعیت تردد یافت نشد."
-
-    if "محورهای مسدود" in full_text:
+    if "محورهای مسدود تا اطلاع ثانوی" in full_text:
+        start = full_text.find("محورهای مسدود تا اطلاع ثانوی")
+        end = full_text.find("ممنوعیت تردد", start)
+        if end == -1:
+            end = len(full_text)
+        blocked = full_text[start:end].strip()
+    elif "محورهای مسدود" in full_text:   # fallback
         start = full_text.find("محورهای مسدود")
         end = full_text.find("ممنوعیت تردد", start)
         if end == -1:
             end = len(full_text)
         blocked = full_text[start:end].strip()
 
-    if "ممنوعیت تردد" in full_text:
+    # استخراج ممنوعیت تردد (فقط از "ممنوعیت تردد به‌تفکیک" به بعد)
+    restricted = "اطلاعات ممنوعیت تردد یافت نشد."
+    if "ممنوعیت تردد به‌تفکیک" in full_text:
+        start = full_text.find("ممنوعیت تردد به‌تفکیک")
+        restricted = full_text[start:].strip()
+    elif "ممنوعیت تردد" in full_text:   # fallback
         start = full_text.find("ممنوعیت تردد")
         restricted = full_text[start:].strip()
 
@@ -71,12 +80,10 @@ def get_traffic_info():
     # مقایسه
     if new_status.strip() == old_status:
         print("ℹ️ تغییری در وضعیت راه‌ها ایجاد نشده. پیامی به دیسکورد ارسال نمی‌شود.")
-        # فایل را تغییر نمی‌دهیم تا workflow کامیت نکند
         return
 
     # تغییر وجود دارد: ارسال به دیسکورد و به‌روزرسانی فایل
     print("🔄 تغییرات جدید شناسایی شد. ارسال به دیسکورد...")
-    # اگر متن طولانی بود، برش بزن (حداکثر ۲۰۰۰ کاراکتر)
     if len(new_status) > 2000:
         message_to_send = new_status[:1900] + "\n... (متن کامل در لاگ موجود است)"
     else:
