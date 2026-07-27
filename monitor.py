@@ -122,7 +122,11 @@ def get_obstructions_141():
         print("⚠️ (۱۴۱) هیچ ردیف انسدادی پیدا نشد.")
         return
 
-    obstructions = []
+    # مجموعه شناسه‌های جدید (استان + مسیر)
+    new_ids = set()
+    # اطلاعات کامل ردیف‌ها برای ساخت پیام در صورت جدید بودن
+    all_current = {}   # id -> dict with details
+
     for row in rows:
         p_tags = row.find_all("p")
         if len(p_tags) < 5:
@@ -139,37 +143,51 @@ def get_obstructions_141():
         direction_span = direction_p.find("span")
         direction = direction_span.text.strip() if direction_span else direction_p.text.strip()
 
-        obstructions.append(
-            f"• استان: {province}\n"
-            f"  تاریخ: {date_str}\n"
-            f"  مسیر: {description}\n"
-            f"  علت: {reason}\n"
-            f"  جهت: {direction}"
-        )
+        # شناسه یکتا: ترکیب استان + مسیر (می‌توان تاریخ را هم اضافه کرد ولی معمولاً مسیر ثابت است)
+        uid = f"{province}::{description}"
+        new_ids.add(uid)
+        all_current[uid] = {
+            "date": date_str,
+            "province": province,
+            "description": description,
+            "reason": reason,
+            "direction": direction
+        }
 
-    if not obstructions:
-        print("⚠️ (۱۴۱) لیست انسدادها خالی است.")
-        return
-
-    new_content = "\u200F**🚧 انسدادهای جاده‌ای (سایت ۱۴۱):**\n" + "\n\n".join(obstructions)
-
-    old_content = ""
+    # خواندن شناسه‌های قبلی از فایل
+    old_ids = set()
     if os.path.exists(STATUS_FILE_141):
         with open(STATUS_FILE_141, "r", encoding="utf-8") as f:
             try:
                 data = json.load(f)
-                old_content = data.get("content", "")
+                old_ids = set(data.get("ids", []))
             except:
-                old_content = ""
+                old_ids = set()
 
-    if new_content == old_content:
-        print("ℹ️ (۱۴۱) تغییری در لیست انسدادها ایجاد نشده.")
+    # پیدا کردن شناسه‌های جدید
+    new_items_ids = new_ids - old_ids
+    if not new_items_ids:
+        print("ℹ️ (۱۴۱) هیچ مورد جدیدی اضافه نشده است.")
     else:
-        print("🔄 (۱۴۱) تغییر در لیست انسدادها شناسایی شد.")
-        send_discord_message(new_content)
-        with open(STATUS_FILE_141, "w", encoding="utf-8") as f:
-            json.dump({"content": new_content}, f, ensure_ascii=False, indent=2)
-        print("✅ (۱۴۱) فایل وضعیت انسدادها به‌روزرسانی شد.")
+        print(f"🆕 (۱۴۱) {len(new_items_ids)} مورد جدید اضافه شده:")
+        # ساخت پیام با موارد جدید
+        new_messages = []
+        for uid in new_items_ids:
+            info = all_current[uid]
+            new_messages.append(
+                f"• استان: {info['province']}\n"
+                f"  تاریخ: {info['date']}\n"
+                f"  مسیر: {info['description']}\n"
+                f"  علت: {info['reason']}\n"
+                f"  جهت: {info['direction']}"
+            )
+        full_message = "\u200F**🚧 انسدادهای جدید (سایت ۱۴۱):**\n" + "\n\n".join(new_messages)
+        send_discord_message(full_message)
+
+    # ذخیره مجموعه جدید
+    with open(STATUS_FILE_141, "w", encoding="utf-8") as f:
+        json.dump({"ids": list(new_ids)}, f, ensure_ascii=False, indent=2)
+    print("✅ (۱۴۱) فایل وضعیت انسدادها به‌روزرسانی شد.")
 
 # --- اجرای اصلی ---
 if __name__ == "__main__":
