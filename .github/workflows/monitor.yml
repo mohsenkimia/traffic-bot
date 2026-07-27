@@ -31,6 +31,8 @@ jobs:
         env:
           DISCORD_WEBHOOK: ${{ secrets.DISCORD_WEBHOOK }}
           ENABLE_MOMTAZ: ${{ secrets.ENABLE_MOMTAZ }}
+          ENABLE_141_OBSTRUCTIONS: ${{ secrets.ENABLE_141_OBSTRUCTIONS }}
+          ENABLE_141_STATE: ${{ secrets.ENABLE_141_STATE }}
         run: |
           python monitor.py
 
