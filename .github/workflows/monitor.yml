@@ -33,6 +33,7 @@ jobs:
           ENABLE_MOMTAZ: ${{ secrets.ENABLE_MOMTAZ }}
           ENABLE_141_OBSTRUCTIONS: ${{ secrets.ENABLE_141_OBSTRUCTIONS }}
           ENABLE_141_STATE: ${{ secrets.ENABLE_141_STATE }}
+          ENABLE_141_POLICE: ${{ secrets.ENABLE_141_POLICE }}
         run: |
           python monitor.py
 
@@ -40,7 +41,7 @@ jobs:
         run: |
           git config --global user.name "github-actions[bot]"
           git config --global user.email "41898282+github-actions[bot]@users.noreply.github.com"
-          git add last_status.json obstruction_status.json roads_state_141.json
+          git add last_status.json obstruction_status.json roads_state_141.json police_restrictions_141.json
           git diff --cached --quiet && exit 0
           git commit -m "Update last status"
           git push
