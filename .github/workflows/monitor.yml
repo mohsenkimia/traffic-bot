@@ -30,6 +30,7 @@ jobs:
       - name: Run monitor
         env:
           DISCORD_WEBHOOK: ${{ secrets.DISCORD_WEBHOOK }}
+          ENABLE_MOMTAZ: ${{ secrets.ENABLE_MOMTAZ }}
         run: |
           python monitor.py
 
