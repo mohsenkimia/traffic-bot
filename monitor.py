@@ -8,10 +8,14 @@ from playwright.sync_api import sync_playwright
 URL_MOMTAZ = "https://www.momtaznews.com/%D8%A2%D8%AE%D8%B1%DB%8C%D9%86-%D9%88%D8%B6%D8%B9%DB%8C%D8%AA-%D8%AA%D8%B1%D8%A7%D9%81%DB%8C%DA%A9-%D8%AC%D8%A7%D8%AF%D9%87-%D9%87%D8%A7/"
 URL_141 = "https://141.ir/news/obstruction-list"
 URL_141_STATE = "https://141.ir/news/latest-roads-state"
+URL_141_POLICE = "https://141.ir/news/police-traffic-restrictions"
+
 DISCORD_WEBHOOK = os.environ.get("DISCORD_WEBHOOK")
+
 STATUS_FILE_MOMTAZ = "last_status.json"
 STATUS_FILE_141 = "obstruction_status.json"
 STATUS_FILE_141_STATE = "roads_state_141.json"
+STATUS_FILE_141_POLICE = "police_restrictions_141.json"
 
 # --- ابزار ارسال پیام به دیسکورد (تکه‌تکه) ---
 def send_discord_message(content: str):
@@ -102,7 +106,7 @@ def get_traffic_info_momtaz():
             json.dump(new_sections, f, ensure_ascii=False, indent=2)
         print("✅ (ممتاز نیوز) فایل وضعیت به‌روزرسانی شد.")
 
-# --- بخش ۱۴۱: انسدادها (فقط موارد جدید) ---
+# --- بخش ۱۴۱: انسدادها (فقط موارد جدید، بدون لینک) ---
 def get_obstructions_141():
     print("🔄 (۱۴۱) در حال بارگذاری صفحه با مرورگر...")
     with sync_playwright() as p:
@@ -198,7 +202,6 @@ def get_latest_roads_state_141():
             browser.close()
             return
 
-        # استخراج تب اول (شمالی) – همان بخش پیش‌فرض نمایش داده شده
         try:
             content_div_1 = page.wait_for_selector("div.flex-1 > div.bg-buttons", timeout=10000)
             north_html = content_div_1.inner_html()
@@ -207,10 +210,9 @@ def get_latest_roads_state_141():
             browser.close()
             return
 
-        # کلیک روی تب دوم (سایر محورها)
         try:
             page.click("text=آخرین وضعیت جوی ترافیکی سایر محور ها")
-            page.wait_for_timeout(2000)   # منتظر لود شدن محتوا
+            page.wait_for_timeout(2000)
             content_div_2 = page.wait_for_selector("div.flex-1 > div.bg-buttons", timeout=10000)
             other_html = content_div_2.inner_html()
         except:
@@ -220,7 +222,6 @@ def get_latest_roads_state_141():
 
         browser.close()
 
-    # تبدیل HTML هر بخش به متن ساده
     def extract_text_from_html(html):
         soup = BeautifulSoup(html, "html.parser")
         lines = []
@@ -262,13 +263,91 @@ def get_latest_roads_state_141():
             json.dump(new_sections, f, ensure_ascii=False, indent=2)
         print("✅ (۱۴۱-State) فایل وضعیت به‌روزرسانی شد.")
 
-# --- اجرای اصلی ---
+# --- بخش ۱۴۱: محدودیت‌های تردد پلیس ---
+def get_police_restrictions_141():
+    print("🔄 (۱۴۱-Police) در حال بارگذاری صفحه با مرورگر...")
+    with sync_playwright() as p:
+        browser = p.chromium.launch(headless=True)
+        page = browser.new_page()
+        try:
+            page.goto(URL_141_POLICE, wait_until="domcontentloaded", timeout=120000)
+            page.wait_for_selector("div.flex-1 > div.bg-buttons", timeout=30000)
+        except Exception as e:
+            print(f"⚠️ (۱۴۱-Police) خطا در بارگذاری: {e}")
+            browser.close()
+            return
+
+        try:
+            content_div = page.wait_for_selector("div.flex-1 > div.bg-buttons", timeout=10000)
+            main_html = content_div.inner_html()
+        except:
+            print("⚠️ (۱۴۱-Police) محتوای محدودیت‌ها پیدا نشد.")
+            browser.close()
+            return
+
+        second_html = ""
+        try:
+            page.click("text=محدودیت تردد وسایل نقلیه")   # در صورت وجود تب دوم
+            page.wait_for_timeout(2000)
+            second_div = page.wait_for_selector("div.flex-1 > div.bg-buttons", timeout=10000)
+            second_html = second_div.inner_html()
+        except:
+            pass
+
+        browser.close()
+
+    def extract_text(html):
+        soup = BeautifulSoup(html, "html.parser")
+        lines = []
+        for p in soup.find_all("p", class_="MsoNormal"):
+            line = p.get_text(strip=True)
+            if line:
+                lines.append(line)
+        return "\n".join(lines) if lines else "اطلاعات موجود نیست."
+
+    main_text = extract_text(main_html)
+    second_text = extract_text(second_html) if second_html else ""
+
+    sections = {}
+    if main_text:
+        sections["محدودیت‌های تردد (اصلی)"] = f"**محدودیت‌های تردد (پلیس راه):**\n{main_text}"
+    if second_text:
+        sections["سایر محدودیت‌ها"] = f"**سایر محدودیت‌ها:**\n{second_text}"
+
+    if not sections:
+        print("⚠️ (۱۴۱-Police) متنی برای محدودیت‌ها استخراج نشد.")
+        return
+
+    old_sections = {}
+    if os.path.exists(STATUS_FILE_141_POLICE):
+        with open(STATUS_FILE_141_POLICE, "r", encoding="utf-8") as f:
+            try:
+                old_sections = json.load(f)
+            except:
+                old_sections = {}
+
+    changed = False
+    for title, text in sections.items():
+        old_text = old_sections.get(title, "")
+        if text != old_text:
+            changed = True
+            message = "\u200F" + text
+            print(f"🔄 (۱۴۱-Police) تغییر در بخش «{title}»")
+            send_discord_message(message)
+
+    if not changed:
+        print("ℹ️ (۱۴۱-Police) تغییری در محدودیت‌ها ایجاد نشده.")
+    else:
+        with open(STATUS_FILE_141_POLICE, "w", encoding="utf-8") as f:
+            json.dump(sections, f, ensure_ascii=False, indent=2)
+        print("✅ (۱۴۱-Police) فایل وضعیت به‌روزرسانی شد.")
+
+# --- اجرای اصلی با کنترل از طریق Secrets ---
 if __name__ == "__main__":
-    # فعال/غیرفعال کردن هر بخش با Secret مربوطه
     if os.environ.get("ENABLE_MOMTAZ", "false").lower() == "true":
         get_traffic_info_momtaz()
     else:
-        print("ℹ️ (ممتاز نیوز) غیرفعال است. (ENABLE_MOMTAZ=true برای فعال‌سازی)")
+        print("ℹ️ (ممتاز نیوز) غیرفعال است. (ENABLE_MOMTAZ=true)")
 
     if os.environ.get("ENABLE_141_OBSTRUCTIONS", "false").lower() == "true":
         get_obstructions_141()
@@ -279,3 +358,8 @@ if __name__ == "__main__":
         get_latest_roads_state_141()
     else:
         print("ℹ️ (۱۴۱ - وضعیت راه‌ها) غیرفعال است. (ENABLE_141_STATE=true)")
+
+    if os.environ.get("ENABLE_141_POLICE", "false").lower() == "true":
+        get_police_restrictions_141()
+    else:
+        print("ℹ️ (۱۴۱ - محدودیت‌های پلیس) غیرفعال است. (ENABLE_141_POLICE=true)")
