@@ -264,11 +264,18 @@ def get_latest_roads_state_141():
 
 # --- اجرای اصلی ---
 if __name__ == "__main__":
-    # فعال/غیرفعال کردن ممتاز نیوز با Secret
+    # فعال/غیرفعال کردن هر بخش با Secret مربوطه
     if os.environ.get("ENABLE_MOMTAZ", "false").lower() == "true":
         get_traffic_info_momtaz()
     else:
-        print("ℹ️ (ممتاز نیوز) غیرفعال است. (برای فعال‌سازی ENABLE_MOMTAZ=true در Secrets)")
-    
-    get_obstructions_141()
-    get_latest_roads_state_141()
+        print("ℹ️ (ممتاز نیوز) غیرفعال است. (ENABLE_MOMTAZ=true برای فعال‌سازی)")
+
+    if os.environ.get("ENABLE_141_OBSTRUCTIONS", "false").lower() == "true":
+        get_obstructions_141()
+    else:
+        print("ℹ️ (۱۴۱ - انسدادها) غیرفعال است. (ENABLE_141_OBSTRUCTIONS=true)")
+
+    if os.environ.get("ENABLE_141_STATE", "false").lower() == "true":
+        get_latest_roads_state_141()
+    else:
+        print("ℹ️ (۱۴۱ - وضعیت راه‌ها) غیرفعال است. (ENABLE_141_STATE=true)")
