@@ -7,9 +7,11 @@ from playwright.sync_api import sync_playwright
 # --- تنظیمات ---
 URL_MOMTAZ = "https://www.momtaznews.com/%D8%A2%D8%AE%D8%B1%DB%8C%D9%86-%D9%88%D8%B6%D8%B9%DB%8C%D8%AA-%D8%AA%D8%B1%D8%A7%D9%81%DB%8C%DA%A9-%D8%AC%D8%A7%D8%AF%D9%87-%D9%87%D8%A7/"
 URL_141 = "https://141.ir/news/obstruction-list"
+URL_141_STATE = "https://141.ir/news/latest-roads-state"
 DISCORD_WEBHOOK = os.environ.get("DISCORD_WEBHOOK")
 STATUS_FILE_MOMTAZ = "last_status.json"
 STATUS_FILE_141 = "obstruction_status.json"
+STATUS_FILE_141_STATE = "roads_state_141.json"
 
 # --- ابزار ارسال پیام به دیسکورد (تکه‌تکه) ---
 def send_discord_message(content: str):
@@ -100,7 +102,7 @@ def get_traffic_info_momtaz():
             json.dump(new_sections, f, ensure_ascii=False, indent=2)
         print("✅ (ممتاز نیوز) فایل وضعیت به‌روزرسانی شد.")
 
-# --- بخش ۱۴۱ (با Playwright) ---
+# --- بخش ۱۴۱: انسدادها (فقط موارد جدید) ---
 def get_obstructions_141():
     print("🔄 (۱۴۱) در حال بارگذاری صفحه با مرورگر...")
     with sync_playwright() as p:
@@ -122,10 +124,8 @@ def get_obstructions_141():
         print("⚠️ (۱۴۱) هیچ ردیف انسدادی پیدا نشد.")
         return
 
-    # مجموعه شناسه‌های جدید (استان + مسیر)
     new_ids = set()
-    # اطلاعات کامل ردیف‌ها برای ساخت پیام در صورت جدید بودن
-    all_current = {}   # id -> dict with details
+    all_current = {}
 
     for row in rows:
         p_tags = row.find_all("p")
@@ -143,7 +143,6 @@ def get_obstructions_141():
         direction_span = direction_p.find("span")
         direction = direction_span.text.strip() if direction_span else direction_p.text.strip()
 
-        # شناسه یکتا: ترکیب استان + مسیر (می‌توان تاریخ را هم اضافه کرد ولی معمولاً مسیر ثابت است)
         uid = f"{province}::{description}"
         new_ids.add(uid)
         all_current[uid] = {
@@ -154,7 +153,6 @@ def get_obstructions_141():
             "direction": direction
         }
 
-    # خواندن شناسه‌های قبلی از فایل
     old_ids = set()
     if os.path.exists(STATUS_FILE_141):
         with open(STATUS_FILE_141, "r", encoding="utf-8") as f:
@@ -164,13 +162,11 @@ def get_obstructions_141():
             except:
                 old_ids = set()
 
-    # پیدا کردن شناسه‌های جدید
     new_items_ids = new_ids - old_ids
     if not new_items_ids:
         print("ℹ️ (۱۴۱) هیچ مورد جدیدی اضافه نشده است.")
     else:
         print(f"🆕 (۱۴۱) {len(new_items_ids)} مورد جدید اضافه شده:")
-        # ساخت پیام با موارد جدید
         new_messages = []
         for uid in new_items_ids:
             info = all_current[uid]
@@ -184,12 +180,90 @@ def get_obstructions_141():
         full_message = "\u200F**🚧 انسدادهای جدید (سایت ۱۴۱):**\n" + "\n\n".join(new_messages)
         send_discord_message(full_message)
 
-    # ذخیره مجموعه جدید
     with open(STATUS_FILE_141, "w", encoding="utf-8") as f:
         json.dump({"ids": list(new_ids)}, f, ensure_ascii=False, indent=2)
     print("✅ (۱۴۱) فایل وضعیت انسدادها به‌روزرسانی شد.")
+
+# --- بخش ۱۴۱: وضعیت راه‌ها (شمالی و سایر) ---
+def get_latest_roads_state_141():
+    print("🔄 (۱۴۱-State) در حال بارگذاری صفحه با مرورگر...")
+    with sync_playwright() as p:
+        browser = p.chromium.launch(headless=True)
+        page = browser.new_page()
+        try:
+            page.goto(URL_141_STATE, wait_until="domcontentloaded", timeout=120000)
+            page.wait_for_selector("div.sticky.top-20", timeout=30000)
+        except Exception as e:
+            print(f"⚠️ (۱۴۱-State) خطا در بارگذاری صفحه: {e}")
+            browser.close()
+            return
+
+        # استخراج تب اول (شمالی) – همان بخش پیش‌فرض نمایش داده شده
+        try:
+            content_div_1 = page.wait_for_selector("div.flex-1 > div.bg-buttons", timeout=10000)
+            north_html = content_div_1.inner_html()
+        except:
+            print("⚠️ (۱۴۱-State) تب اول پیدا نشد.")
+            browser.close()
+            return
+
+        # کلیک روی تب دوم (سایر محورها)
+        try:
+            page.click("text=آخرین وضعیت جوی ترافیکی سایر محور ها")
+            page.wait_for_timeout(2000)   # منتظر لود شدن محتوا
+            content_div_2 = page.wait_for_selector("div.flex-1 > div.bg-buttons", timeout=10000)
+            other_html = content_div_2.inner_html()
+        except:
+            print("⚠️ (۱۴۱-State) تب دوم پیدا نشد یا کلیک ناموفق بود.")
+            browser.close()
+            return
+
+        browser.close()
+
+    # تبدیل HTML هر بخش به متن ساده
+    def extract_text_from_html(html):
+        soup = BeautifulSoup(html, "html.parser")
+        lines = []
+        for p in soup.find_all("p", class_="MsoNormal"):
+            line = p.get_text(strip=True)
+            if line:
+                lines.append(line)
+        return "\n".join(lines) if lines else "اطلاعات موجود نیست."
+
+    north_text = extract_text_from_html(north_html)
+    other_text = extract_text_from_html(other_html)
+
+    new_sections = {
+        "آخرین وضعیت جوی ترافیکی محورهای شمالی": f"**آخرین وضعیت جوی ترافیکی محورهای شمالی:**\n{north_text}",
+        "آخرین وضعیت جوی ترافیکی سایر محورها": f"**آخرین وضعیت جوی ترافیکی سایر محورها:**\n{other_text}"
+    }
+
+    old_sections = {}
+    if os.path.exists(STATUS_FILE_141_STATE):
+        with open(STATUS_FILE_141_STATE, "r", encoding="utf-8") as f:
+            try:
+                old_sections = json.load(f)
+            except:
+                old_sections = {}
+
+    changed = False
+    for title, text in new_sections.items():
+        old_text = old_sections.get(title, "")
+        if text != old_text:
+            changed = True
+            message = "\u200F" + text
+            print(f"🔄 (۱۴۱-State) تغییر در بخش «{title}»")
+            send_discord_message(message)
+
+    if not changed:
+        print("ℹ️ (۱۴۱-State) تغییری در وضعیت راه‌ها ایجاد نشده.")
+    else:
+        with open(STATUS_FILE_141_STATE, "w", encoding="utf-8") as f:
+            json.dump(new_sections, f, ensure_ascii=False, indent=2)
+        print("✅ (۱۴۱-State) فایل وضعیت به‌روزرسانی شد.")
 
 # --- اجرای اصلی ---
 if __name__ == "__main__":
     get_traffic_info_momtaz()
     get_obstructions_141()
+    get_latest_roads_state_141()
