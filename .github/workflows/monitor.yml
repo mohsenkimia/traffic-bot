@@ -37,7 +37,7 @@ jobs:
         run: |
           git config --global user.name "github-actions[bot]"
           git config --global user.email "41898282+github-actions[bot]@users.noreply.github.com"
-          git add last_status.json obstruction_status.json
+          git add last_status.json obstruction_status.json roads_state_141.json
           git diff --cached --quiet && exit 0
           git commit -m "Update last status"
           git push
