@@ -9,6 +9,7 @@ URL_MOMTAZ = "https://www.momtaznews.com/%D8%A2%D8%AE%D8%B1%DB%8C%D9%86-%D9%88%D
 URL_141 = "https://141.ir/news/obstruction-list"
 URL_141_STATE = "https://141.ir/news/latest-roads-state"
 URL_141_POLICE = "https://141.ir/news/police-traffic-restrictions"
+URL_141_WORKSHOPS = "https://api.141.ir/api/road_workshops/bbox"
 
 DISCORD_WEBHOOK = os.environ.get("DISCORD_WEBHOOK")
 
@@ -16,6 +17,7 @@ STATUS_FILE_MOMTAZ = "last_status.json"
 STATUS_FILE_141 = "obstruction_status.json"
 STATUS_FILE_141_STATE = "roads_state_141.json"
 STATUS_FILE_141_POLICE = "police_restrictions_141.json"
+STATUS_FILE_141_WORKSHOPS = "workshops_141.json"
 
 # --- ابزار ارسال پیام به دیسکورد (تکه‌تکه) ---
 def send_discord_message(content: str):
@@ -287,7 +289,7 @@ def get_police_restrictions_141():
 
         second_html = ""
         try:
-            page.click("text=محدودیت تردد وسایل نقلیه")   # در صورت وجود تب دوم
+            page.click("text=محدودیت تردد وسایل نقلیه")
             page.wait_for_timeout(2000)
             second_div = page.wait_for_selector("div.flex-1 > div.bg-buttons", timeout=10000)
             second_html = second_div.inner_html()
@@ -342,6 +344,93 @@ def get_police_restrictions_141():
             json.dump(sections, f, ensure_ascii=False, indent=2)
         print("✅ (۱۴۱-Police) فایل وضعیت به‌روزرسانی شد.")
 
+# --- بخش ۱۴۱: کارگاه‌های جاده‌ای (API با تقسیم‌بندی) ---
+def get_workshops_141():
+    print("🔄 (۱۴۱-Workshops) دریافت لیست کارگاه‌ها...")
+    headers = {
+        "User-Agent": "Mozilla/5.0 (compatible; TrafficBot/1.0)",
+        "Accept": "application/json, text/plain, */*",
+        "Origin": "https://141.ir",
+        "Referer": "https://141.ir/",
+    }
+
+    # ۴ ناحیه برای پوشش کل ایران با zoom=8
+    regions = [
+        {"min_lon": "44", "min_lat": "32", "max_lon": "50", "max_lat": "40", "zoom": "8"},  # شمال غرب
+        {"min_lon": "50", "min_lat": "32", "max_lon": "64", "max_lat": "40", "zoom": "8"},  # شمال شرق
+        {"min_lon": "44", "min_lat": "25", "max_lon": "50", "max_lat": "32", "zoom": "8"},  # جنوب غرب
+        {"min_lon": "50", "min_lat": "25", "max_lon": "64", "max_lat": "32", "zoom": "8"},  # جنوب شرق
+    ]
+
+    all_ids = set()
+    all_current = {}
+
+    for i, region in enumerate(regions, 1):
+        try:
+            resp = requests.post(URL_141_WORKSHOPS, headers=headers, data=region, timeout=30)
+            resp.raise_for_status()
+            data = resp.json()
+        except Exception as e:
+            print(f"⚠️ (۱۴۱-Workshops) خطا در ناحیه {i}: {e}")
+            continue
+
+        items = data.get("data", [])
+        for item in items:
+            uid = str(item["id"])
+            if uid in all_ids:
+                continue   # تکراری نگیریم
+            all_ids.add(uid)
+            meta = item["meta"]
+            start_time = meta["start_time"]
+            end_time = meta["end_time"]
+            all_current[uid] = {
+                "title": meta["title"],
+                "province": meta["province_fa"],
+                "start_date": meta["start_date"],
+                "end_date": meta["end_date"],
+                "start_time": f"{start_time[:2]}:{start_time[2:]}",
+                "end_time": f"{end_time[:2]}:{end_time[2:]}",
+                "status": meta["passing_situation_fa"],
+                "operation": meta["operation_type_fa"]
+            }
+
+    if not all_current:
+        print("⚠️ (۱۴۱-Workshops) هیچ کارگاهی دریافت نشد.")
+        return
+
+    old_ids = set()
+    if os.path.exists(STATUS_FILE_141_WORKSHOPS):
+        with open(STATUS_FILE_141_WORKSHOPS, "r", encoding="utf-8") as f:
+            try:
+                old_data = json.load(f)
+                old_ids = set(old_data.get("ids", []))
+            except:
+                old_ids = set()
+
+    added = all_ids - old_ids
+    if not added:
+        print("ℹ️ (۱۴۱-Workshops) هیچ کارگاه جدیدی اضافه نشده.")
+    else:
+        print(f"🆕 (۱۴۱-Workshops) {len(added)} کارگاه جدید:")
+        messages = []
+        for uid in added:
+            w = all_current[uid]
+            msg = (
+                f"• استان: {w['province']}\n"
+                f"  تاریخ: {w['start_date']} تا {w['end_date']}\n"
+                f"  ساعت: {w['start_time']} تا {w['end_time']}\n"
+                f"  وضعیت: {w['status']}\n"
+                f"  عملیات: {w['operation']}\n"
+                f"  مسیر: {w['title']}"
+            )
+            messages.append(msg)
+        full = "\u200F**🛠️ کارگاه‌های جاده‌ای جدید (سایت ۱۴۱):**\n" + "\n\n".join(messages)
+        send_discord_message(full)
+
+    with open(STATUS_FILE_141_WORKSHOPS, "w", encoding="utf-8") as f:
+        json.dump({"ids": list(all_ids)}, f, ensure_ascii=False, indent=2)
+    print("✅ (۱۴۱-Workshops) فایل وضعیت به‌روزرسانی شد.")
+
 # --- اجرای اصلی با کنترل از طریق Secrets ---
 if __name__ == "__main__":
     if os.environ.get("ENABLE_MOMTAZ", "false").lower() == "true":
@@ -363,3 +452,8 @@ if __name__ == "__main__":
         get_police_restrictions_141()
     else:
         print("ℹ️ (۱۴۱ - محدودیت‌های پلیس) غیرفعال است. (ENABLE_141_POLICE=true)")
+
+    if os.environ.get("ENABLE_141_WORKSHOPS", "false").lower() == "true":
+        get_workshops_141()
+    else:
+        print("ℹ️ (۱۴۱ - کارگاه‌های جاده‌ای) غیرفعال است. (ENABLE_141_WORKSHOPS=true)")
