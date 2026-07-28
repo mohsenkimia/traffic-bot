@@ -424,7 +424,7 @@ def get_workshops_141():
                 f"  مسیر: {w['title']}"
             )
             messages.append(msg)
-        full = "\u200F**🛠️ کارگاه‌های جاده‌ای جدید (سایت ۱۴۱):**\n" + "\n\n".join(messages)
+        full = "\u200F**🛠️ کارگاه جاده‌ای تازه:**\n" + "\n\n".join(messages)
         send_discord_message(full)
 
     with open(STATUS_FILE_141_WORKSHOPS, "w", encoding="utf-8") as f:
